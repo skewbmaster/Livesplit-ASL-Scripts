@@ -40,6 +40,9 @@ start
 {
     vars.TotalTime = 0f;
     
+    /*if (version != "v1.1")
+        return;
+
     IntPtr savesStatic = new DeepPointer("mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x230, 0x108, 0xD0, 0x8, 0x60).Deref<IntPtr>(game);
     vars.currentSaveSlot = new DeepPointer(savesStatic + 0x14).Deref<int>(game);
     bool slotInUseCurrent = new DeepPointer(savesStatic + 0x8, 0x20 + vars.currentSaveSlot * 8, 0xD1).Deref<bool>(game);
@@ -48,7 +51,7 @@ start
         vars.slotInUse = true;
         return true;
     }
-    vars.slotInUse = slotInUseCurrent;
+    vars.slotInUse = slotInUseCurrent;*/
 
     //if (current.levelID == 0) 
     {
