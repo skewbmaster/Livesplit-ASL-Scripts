@@ -1,88 +1,148 @@
-state("Spark the Electric Jester 3", "v1.1")
-{
-    float igtimer : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x478, 0xD0, 0x8, 0x60, 0x8;
-    bool isPaused : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x708, 0x108, 0xD0, 0x8, 0x60, 0x4;
-    float fileInStageTime : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0xB8, 0x108, 0xD0, 0x8, 0x60, 0xC;
-}
-state("Spark the Electric Jester 3", "v1.0")
-{
-    float igtimer : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x450, 0x108, 0xD0, 0x8, 0x60, 0x8;
-    bool isPaused : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x6D0, 0xB8, 0xD0, 0x8, 0x60, 0x4;
-    float fileInStageTime : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x98, 0x108, 0xD0, 0x8, 0x60, 0xC;
-    int levelID : "mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x2B0, 0xD0, 0x8, 0x60, 0xC;
-    //byte inShop : "UnityPlayer.dll", 0x19EF1B0, 0x200, 0x148, 0x28, 0x170, 0x910;
-}
-
-init
-{
-    // This should point to the class named "StageTimer" in 1.0, and "StageConpleteControl" in 1.1
-    string verIdentifier = new DeepPointer("mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x450, 0x108, 0x48, 0x0).DerefString(game, 40);
-    if (verIdentifier == "StageConpleteControl")
-    {
-        version = "v1.1";
-    }
-    else if (verIdentifier == "StageTimer")
-    {
-        version = "v1.0";
-    }
-    print("Running on version: " + version);
-}
+state("Spark the Electric Jester 3") {}
 
 startup
 {
-    vars.GameTime = TimeSpan.FromSeconds(0);
+	vars.Log = (Action<object>)(output => print("[Spark the Electric Jester 3] " + output));
+
+	if (!File.Exists(@"Components\UnityASL.bin"))
+	{
+		print("No UnityASL detected, downloading to Components folder");
+		vars.DownloadUnityHelperFunc = (Func<int>)(() =>
+		{
+			using (var client = new System.Net.WebClient())
+			{
+				client.DownloadFile("https://github.com/just-ero/asl-help/raw/main/lib/UnityASL.bin", @"Components\UnityASL.bin");
+			}
+			return 1;
+		});
+		vars.DownloadUnityHelperFunc();
+		print("Downloaded UnityASL");
+	}
+
+	vars.Unity = Assembly.Load(File.ReadAllBytes(@"Components\UnityASL.bin")).CreateInstance("UnityASL.Unity");
+	vars.Unity.LoadSceneManager = true;
+
+	if (timer.CurrentTimingMethod == TimingMethod.RealTime)
+	{
+		var mbox = MessageBox.Show(
+			"Spark 3 uses in-game time.\nWould you like to switch to it?",
+			"LiveSplit | Spark the Electric Jester 3",
+			MessageBoxButtons.YesNo);
+
+		if (mbox == DialogResult.Yes)
+			timer.CurrentTimingMethod = TimingMethod.GameTime;
+	}
+
+	vars.GameTime = TimeSpan.FromSeconds(0);
+	vars.totalPauseRTA = new TimeSpan(0);
+	vars.previousRTA = new TimeSpan(0);
     vars.TotalTime = 0f;
     refreshRate = 60;
-    vars.slotInUse = false;
 }
 
-start
+onStart
+{}
+
+onSplit
+{}
+
+onReset
+{}
+
+init
 {
-    vars.TotalTime = 0f;
-    
-    /*if (version != "v1.1")
-        return;
+	//current.Scene = -1;
 
-    IntPtr savesStatic = new DeepPointer("mono-2.0-bdwgc.dll", 0x49A0C8, 0x10, 0x1D0, 0x8, 0x4E0, 0x230, 0x108, 0xD0, 0x8, 0x60).Deref<IntPtr>(game);
-    vars.currentSaveSlot = new DeepPointer(savesStatic + 0x14).Deref<int>(game);
-    bool slotInUseCurrent = new DeepPointer(savesStatic + 0x8, 0x20 + vars.currentSaveSlot * 8, 0xD1).Deref<bool>(game);
-    if (!vars.slotInUse && slotInUseCurrent)
-    {
-        vars.slotInUse = true;
-        return true;
-    }
-    vars.slotInUse = slotInUseCurrent;*/
+	vars.Unity.TryOnLoad = (Func<dynamic, bool>)(helper =>
+	{
+		var save = helper.GetClass("Assembly-CSharp", "Save");
+		vars.SaveFile = helper.GetClass("Assembly-CSharp", "SaveFile");
+		var StageTimer = helper.GetClass("Assembly-CSharp", "StageTimer");
+		var PauseControl = helper.GetClass("Assembly-CSharp", "PauseCotrol");
 
-    //if (current.levelID == 0) 
-    {
-        //return true;
-    }
+		vars.GetCurrentSave = (Func<IntPtr>)(() =>
+		{
+			var saves = vars.Unity.MakeArray<IntPtr>(save.Static, save["Saves"]);
+			int saveSlot = vars.Unity.Make<int>(save.Static, save["CurrentSaveSlot"]);
+
+			return saves[saveSlot];
+		});
+
+		vars.Unity.Make<float>(StageTimer.Static, StageTimer["StageTime"]).Name = "stageTime";
+		vars.Unity.Make<bool>(PauseControl.Static, PauseControl["IsPaused"]).Name = "isPaused";
+
+		return true;
+	});
+
+	vars.Unity.Load(game);
+
+	//vars.Unity.Make<bool>(vars.GetCurrentSave(), vars.SaveFile["SlotInUse"]).Name = "slotInUse";
 }
 
 update
 {
-    float deltaTime;
-    if (current.isPaused)
+	if (!vars.Unity.Loaded)
+		return false;
+
+	vars.Unity.Update();
+
+	current.Scene = vars.Unity.Scenes.Active.Index;
+	//current.SlotInUse = vars.Unity.Make<bool>(vars.GetCurrentSave() + vars.SaveFile["SlotInUse"]);
+
+	float deltaTime;
+	TimeSpan? rawRTA = timer.CurrentTime.RealTime;
+	TimeSpan currentRTA = new TimeSpan(0);
+	if (rawRTA.HasValue)
+	{
+		currentRTA = new TimeSpan(0).Add(rawRTA.Value);
+	}
+
+	if (vars.Unity["isPaused"].Current)
     {
-        deltaTime = current.fileInStageTime - old.fileInStageTime;
-    }
-    else
-    {
-        deltaTime = current.igtimer - old.igtimer;
+        vars.totalPauseRTA = vars.totalPauseRTA.Add(currentRTA-vars.previousRTA);
     }
 
+    deltaTime = vars.Unity["stageTime"].Current - vars.Unity["stageTime"].Old;
     if (deltaTime > 0 && deltaTime < 1)
     {
         vars.TotalTime += deltaTime;
     }
+
+	vars.previousRTA = new TimeSpan(currentRTA.Ticks);
 }
+
+start
+{
+	vars.TotalTime = 0f;
+	vars.previousRTA = new TimeSpan(0);
+	vars.totalPauseRTA = new TimeSpan(0);
+	
+	//return !old.SlotInUse && current.SlotInUse;
+}
+
+split
+{}
+
+reset
+{}
 
 gameTime
 {
-    return TimeSpan.FromSeconds(vars.TotalTime);
+	return TimeSpan.FromSeconds(vars.TotalTime) + vars.totalPauseRTA;
 }
 
 isLoading
 {
-    return true;
+	//return current.Scene == -1 || current.Scene == 3 || current.Scene == 4 || vars.Unity.Scenes.Count > 1;
+	return true;
+}
+
+exit
+{
+	vars.Unity.Reset();
+}
+
+shutdown
+{
+	vars.Unity.Reset();
 }
