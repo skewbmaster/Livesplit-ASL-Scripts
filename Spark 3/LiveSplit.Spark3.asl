@@ -4,34 +4,34 @@ startup
 {
 	vars.Log = (Action<object>)(output => print("[Spark the Electric Jester 3] " + output));
 
-	if (!File.Exists(@"Components\UnityASL.bin"))
+	if (!File.Exists(@"Components\asl-help"))
 	{
-		print("No UnityASL detected, downloading to Components folder");
+		print("No asl-help detected, downloading to Components folder");
 		vars.DownloadUnityHelperFunc = (Func<int>)(() =>
 		{
 			using (var client = new System.Net.WebClient())
 			{
-				client.DownloadFile("https://github.com/just-ero/asl-help/raw/main/lib/UnityASL.bin", @"Components\UnityASL.bin");
+				client.DownloadFile("https://github.com/just-ero/asl-help/raw/main/lib/asl-help", @"Components\asl-help");
 			}
 			return 1;
 		});
 		vars.DownloadUnityHelperFunc();
-		print("Downloaded UnityASL");
+		print("Downloaded asl-help");
 	}
 
-	vars.Unity = Assembly.Load(File.ReadAllBytes(@"Components\UnityASL.bin")).CreateInstance("UnityASL.Unity");
-	vars.Unity.LoadSceneManager = true;
+	Assembly.Load(File.ReadAllBytes(@"Components\asl-help")).CreateInstance("Unity");
+	vars.Helper.GameName = "Spark the Electric Jester 3";
+	vars.Helper.LoadSceneManager = true;
 
-	if (timer.CurrentTimingMethod == TimingMethod.RealTime)
-	{
-		var mbox = MessageBox.Show(
-			"Spark 3 uses in-game time.\nWould you like to switch to it?",
-			"LiveSplit | Spark the Electric Jester 3",
-			MessageBoxButtons.YesNo);
+	// Start of Settings
 
-		if (mbox == DialogResult.Yes)
-			timer.CurrentTimingMethod = TimingMethod.GameTime;
-	}
+	settings.Add("splitResults", true, "Split on every results screen");
+	settings.Add("resetOnDelete", true, "Reset timer when you delete the same file you just played on");
+
+
+
+
+	vars.Helper.AlertGameTime();
 
 	vars.GameTime = TimeSpan.FromSeconds(0);
 	vars.totalPauseRTA = new TimeSpan(0);
@@ -51,43 +51,56 @@ onReset
 
 init
 {
-	//current.Scene = -1;
-
-	vars.Unity.TryOnLoad = (Func<dynamic, bool>)(helper =>
+	vars.Helper.TryLoad = (Func<dynamic, bool>)(mono =>
 	{
-		var save = helper.GetClass("Assembly-CSharp", "Save");
-		vars.SaveFile = helper.GetClass("Assembly-CSharp", "SaveFile");
-		var StageTimer = helper.GetClass("Assembly-CSharp", "StageTimer");
-		var PauseControl = helper.GetClass("Assembly-CSharp", "PauseCotrol");
+		var save = mono["Save"];
+		var SaveFile = mono["SaveFile"];
 
-		vars.GetCurrentSave = (Func<IntPtr>)(() =>
+		var saves = mono.MakeArray<IntPtr>("Save", "Saves");
+		var saveSlot = mono.Make<int>("Save", "CurrentSaveSlot");
+		//vars.Unity.Make<int>(save.Static, save["CurrentSaveSlot"]).Name = "saveSlot";
+
+		vars.GetCurrentSave = (Func<bool>)(() =>
 		{
-			var saves = vars.Unity.MakeArray<IntPtr>(save.Static, save["Saves"]);
-			int saveSlot = vars.Unity.Make<int>(save.Static, save["CurrentSaveSlot"]);
-
-			return saves[saveSlot];
+			saves.Update(game);
+			saveSlot.Update(game);
+			return vars.Helper.Read<bool>(saves.Current[saveSlot.Current] + SaveFile["SlotInUse"]);
 		});
 
-		vars.Unity.Make<float>(StageTimer.Static, StageTimer["StageTime"]).Name = "stageTime";
-		vars.Unity.Make<bool>(PauseControl.Static, PauseControl["IsPaused"]).Name = "isPaused";
+		//vars.Unity.Make<float>(StageTimer.Static, StageTimer["StageTime"]).Name = "stageTime";
+		//vars.Unity.Make<bool>(PauseControl.Static, PauseControl["IsPaused"]).Name = "isPaused";
+
+		vars.Helper["stageTime"] = mono.Make<float>("StageTimer", "StageTime");
+		vars.Helper["isPaused"] = mono.Make<bool>("PauseCotrol", "IsPaused");
 
 		return true;
 	});
 
-	vars.Unity.Load(game);
+	vars.Helper.Load();
+
+	//print(vars.GetCurrentSave().ToString());
 
 	//vars.Unity.Make<bool>(vars.GetCurrentSave(), vars.SaveFile["SlotInUse"]).Name = "slotInUse";
 }
 
 update
 {
-	if (!vars.Unity.Loaded)
+	if (!vars.Helper.Loaded)
 		return false;
 
-	vars.Unity.Update();
+	vars.Helper.Update();
 
-	current.Scene = vars.Unity.Scenes.Active.Index;
-	//current.SlotInUse = vars.Unity.Make<bool>(vars.GetCurrentSave() + vars.SaveFile["SlotInUse"]);
+
+	//print("Saves Pointer: " + vars.Unity["saves"].Current.ToString());
+	//print("Slot number: " + vars.Unity["saveSlot"].Current.ToString());
+
+
+	current.Scene = vars.Helper.Scenes.Active.Index;
+	current.isPaused = vars.Helper["isPaused"].Current;
+	current.stageTime = vars.Helper["stageTime"].Current;
+	current.SlotInUse = vars.GetCurrentSave();
+
+	//print("Scene Index: " + current.Scene.ToString());
 
 	float deltaTime;
 	TimeSpan? rawRTA = timer.CurrentTime.RealTime;
@@ -97,12 +110,12 @@ update
 		currentRTA = new TimeSpan(0).Add(rawRTA.Value);
 	}
 
-	if (vars.Unity["isPaused"].Current)
+	if (current.isPaused && !((current.Scene >= 3 && current.Scene <= 7) || current.Scene == 0))
     {
         vars.totalPauseRTA = vars.totalPauseRTA.Add(currentRTA-vars.previousRTA);
     }
 
-    deltaTime = vars.Unity["stageTime"].Current - vars.Unity["stageTime"].Old;
+    deltaTime = current.stageTime - old.stageTime;
     if (deltaTime > 0 && deltaTime < 1)
     {
         vars.TotalTime += deltaTime;
@@ -113,18 +126,32 @@ update
 
 start
 {
+	//vars.Unity.Make<bool>((vars.Unity["saves"].Current)[vars.Unity["saveSlot"].Current], vars.SaveFile["SlotInUse"]).Name = "slotInUse";
+
 	vars.TotalTime = 0f;
 	vars.previousRTA = new TimeSpan(0);
 	vars.totalPauseRTA = new TimeSpan(0);
 	
-	//return !old.SlotInUse && current.SlotInUse;
+	if (!old.SlotInUse && current.SlotInUse)
+	{
+		
+		return true;
+	}
 }
 
 split
-{}
+{
+	if (current.Scene == 87 && old.Scene != 87 && settings["splitResults"])
+		return true;
+}
 
 reset
-{}
+{
+	if (!current.SlotInUse && old.SlotInUse && settings["resetOnDelete"])
+	{
+		return true;
+	}
+}
 
 gameTime
 {
@@ -139,10 +166,10 @@ isLoading
 
 exit
 {
-	vars.Unity.Reset();
+	vars.Helper.Dispose();
 }
 
 shutdown
 {
-	vars.Unity.Reset();
+	vars.Helper.Dispose();
 }
